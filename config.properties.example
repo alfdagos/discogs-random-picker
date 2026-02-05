@@ -1,0 +1,8 @@
+# Discogs API Configuration
+# Get your token from: https://www.discogs.com/settings/developers
+discogs.username=your_discogs_username
+discogs.token=your_discogs_api_token
+
+# Spotify API Configuration (Optional - for future integration)
+spotify.client.id=your_spotify_client_id
+spotify.client.secret=your_spotify_client_secret
