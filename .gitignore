@@ -66,3 +66,15 @@ config.properties
 
 # Keep example configuration
 !config.properties.example
+
+# Application logs
+logs/
+*.log
+
+# Exported history files
+*.csv
+*.html
+listening_history_export.*
+
+# Keep the main listening history
+!listening_history.json

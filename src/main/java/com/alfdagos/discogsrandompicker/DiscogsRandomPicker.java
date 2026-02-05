@@ -1,216 +1,433 @@
 package com.alfdagos.discogsrandompicker;
 
-import com.google.gson.Gson;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonObject;
-import com.google.gson.reflect.TypeToken;
+import java.util.List;
+import java.util.Scanner;
 
-import java.io.*;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.*;
+import org.apache.commons.cli.CommandLine;
+import org.apache.commons.cli.CommandLineParser;
+import org.apache.commons.cli.DefaultParser;
+import org.apache.commons.cli.HelpFormatter;
+import org.apache.commons.cli.Option;
+import org.apache.commons.cli.Options;
+import org.apache.commons.cli.ParseException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.alfdagos.discogsrandompicker.config.ConfigManager;
+import com.alfdagos.discogsrandompicker.exception.ConfigurationException;
+import com.alfdagos.discogsrandompicker.exception.DiscogsApiException;
+import com.alfdagos.discogsrandompicker.exception.HistoryException;
+import com.alfdagos.discogsrandompicker.model.Album;
+import com.alfdagos.discogsrandompicker.model.AlbumFilter;
+import com.alfdagos.discogsrandompicker.model.ListeningHistoryEntry;
+import com.alfdagos.discogsrandompicker.model.Statistics;
+import com.alfdagos.discogsrandompicker.service.DiscogsService;
+import com.alfdagos.discogsrandompicker.service.ExportService;
+import com.alfdagos.discogsrandompicker.service.HistoryService;
+import com.alfdagos.discogsrandompicker.service.StatisticsService;
 
 /**
- * Discogs Random Picker - A Java CLI application to pick random albums from Discogs collection
- * with Spotify integration for listening history tracking.
+ * Discogs Random Picker - Enhanced CLI application.
+ * 
+ * @version 2.0
+ * @author alfdagos
  */
 public class DiscogsRandomPicker {
-
-    private static final String CONFIG_FILE = "config.properties";
-    private static final String HISTORY_FILE = "listening_history.json";
-    private static Properties config;
-    private static Gson gson = new Gson();
-
+    
+    private static final Logger logger = LoggerFactory.getLogger(DiscogsRandomPicker.class);
+    private static final String VERSION = "2.0";
+    
+    private final ConfigManager config;
+    private final DiscogsService discogsService;
+    private final HistoryService historyService;
+    private final StatisticsService statisticsService;
+    private final ExportService exportService;
+    
+    public DiscogsRandomPicker() throws ConfigurationException {
+        this.config = new ConfigManager();
+        this.discogsService = new DiscogsService(
+            config.getDiscogsUsername(), 
+            config.getDiscogsToken());
+        this.historyService = new HistoryService();
+        this.statisticsService = new StatisticsService(historyService);
+        this.exportService = new ExportService(historyService);
+    }
+    
     public static void main(String[] args) {
+        // Check for help/version before initialization
+        if (args.length > 0 && (args[0].equals("--help") || args[0].equals("-h") || 
+                                args[0].equals("--version") || args[0].equals("-v"))) {
+            Options options = buildOptions();
+            HelpFormatter formatter = new HelpFormatter();
+            formatter.setWidth(100);
+            
+            System.out.println("\n╔════════════════════════════════════════════════════════════════╗");
+            System.out.println("║        DISCOGS RANDOM ALBUM PICKER v" + VERSION + "                       ║");
+            System.out.println("╚════════════════════════════════════════════════════════════════╝\n");
+            
+            formatter.printHelp("java -jar discogs-random-picker.jar [OPTIONS]", 
+                "\nOptions:", options, 
+                "\nExamples:\n" +
+                "  Pick random album:          java -jar discogs-random-picker.jar\n" +
+                "  Filter by genre:            java -jar discogs-random-picker.jar --genre Rock\n" +
+                "  Filter by year:             java -jar discogs-random-picker.jar --year 1980\n" +
+                "  Filter by decade:           java -jar discogs-random-picker.jar --min-year 1970 --max-year 1979\n" +
+                "  Show statistics:            java -jar discogs-random-picker.jar --stats\n" +
+                "  Show history (last 10):     java -jar discogs-random-picker.jar --history --limit 10\n" +
+                "  Export to CSV:              java -jar discogs-random-picker.jar --export csv\n" +
+                "  Export to HTML:             java -jar discogs-random-picker.jar --export html -o myhistory.html\n");
+            return;
+        }
+        
         try {
-            System.out.println("=== Discogs Random Album Picker ===\n");
+            DiscogsRandomPicker app = new DiscogsRandomPicker();
             
-            // Load configuration
-            config = loadConfig();
-            
-            // Get random album from Discogs collection
-            JsonObject album = getRandomAlbum();
-            
-            if (album != null) {
-                displayAlbumInfo(album);
-                
-                // Ask if user wants to mark as listened
-                if (askToMarkAsListened()) {
-                    saveToHistory(album);
-                    System.out.println("\n✓ Album saved to listening history!");
-                }
+            if (args.length == 0) {
+                // Default behavior: pick random album
+                app.pickRandomAlbum(new AlbumFilter());
             } else {
-                System.out.println("Failed to fetch album from Discogs.");
+                // Parse command line arguments
+                app.parseAndExecute(args);
             }
             
+        } catch (ConfigurationException e) {
+            System.err.println("❌ Configuration Error: " + e.getMessage());
+            logger.error("Configuration error", e);
+            System.exit(1);
         } catch (Exception e) {
-            System.err.println("Error: " + e.getMessage());
-            e.printStackTrace();
+            System.err.println("❌ Error: " + e.getMessage());
+            logger.error("Unexpected error", e);
+            System.exit(1);
         }
     }
-
-    private static Properties loadConfig() throws IOException {
-        Properties props = new Properties();
-        try (InputStream input = new FileInputStream(CONFIG_FILE)) {
-            props.load(input);
-        }
-        return props;
-    }
-
-    private static JsonObject getRandomAlbum() throws IOException {
-        String username = config.getProperty("discogs.username");
-        String token = config.getProperty("discogs.token");
+    
+    private void parseAndExecute(String[] args) throws Exception {
+        Options options = buildOptions();
+        CommandLineParser parser = new DefaultParser();
         
-        // First, get the collection count
-        String collectionUrl = String.format(
-            "https://api.discogs.com/users/%s/collection/folders/0/releases?per_page=1",
-            username
-        );
-        
-        JsonObject collectionResponse = makeDiscogsRequest(collectionUrl, token);
-        if (collectionResponse == null || !collectionResponse.has("pagination")) {
-            return null;
-        }
-        
-        int totalItems = collectionResponse.getAsJsonObject("pagination").get("items").getAsInt();
-        
-        // Pick a random page and item
-        Random random = new Random();
-        int randomPage = random.nextInt(Math.max(1, totalItems)) + 1;
-        
-        // Fetch that specific release
-        String randomUrl = String.format(
-            "https://api.discogs.com/users/%s/collection/folders/0/releases?per_page=1&page=%d",
-            username, randomPage
-        );
-        
-        JsonObject randomResponse = makeDiscogsRequest(randomUrl, token);
-        if (randomResponse != null && randomResponse.has("releases")) {
-            JsonArray releases = randomResponse.getAsJsonArray("releases");
-            if (releases.size() > 0) {
-                return releases.get(0).getAsJsonObject();
-            }
-        }
-        
-        return null;
-    }
-
-    private static JsonObject makeDiscogsRequest(String urlString, String token) throws IOException {
-        URL url = new URL(urlString);
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-        conn.setRequestMethod("GET");
-        conn.setRequestProperty("Authorization", "Discogs token=" + token);
-        conn.setRequestProperty("User-Agent", "DiscogsRandomPicker/1.0");
-        
-        int responseCode = conn.getResponseCode();
-        if (responseCode == 200) {
-            BufferedReader in = new BufferedReader(new InputStreamReader(conn.getInputStream()));
-            StringBuilder response = new StringBuilder();
-            String inputLine;
+        try {
+            CommandLine cmd = parser.parse(options, args);
             
-            while ((inputLine = in.readLine()) != null) {
-                response.append(inputLine);
+            if (cmd.hasOption("help")) {
+                printHelp(options);
+                return;
             }
-            in.close();
             
-            return gson.fromJson(response.toString(), JsonObject.class);
+            if (cmd.hasOption("version")) {
+                System.out.println("Discogs Random Picker v" + VERSION);
+                return;
+            }
+            
+            if (cmd.hasOption("stats")) {
+                showStatistics();
+                return;
+            }
+            
+            if (cmd.hasOption("history")) {
+                showHistory(cmd);
+                return;
+            }
+            
+            if (cmd.hasOption("export")) {
+                exportHistory(cmd);
+                return;
+            }
+            
+            if (cmd.hasOption("collection-size")) {
+                showCollectionSize();
+                return;
+            }
+            
+            // Default: pick random album with optional filters
+            AlbumFilter filter = buildFilter(cmd);
+            pickRandomAlbum(filter);
+            
+        } catch (ParseException e) {
+            System.err.println("Error parsing arguments: " + e.getMessage());
+            printHelp(options);
+            System.exit(1);
+        }
+    }
+    
+    private static Options buildOptions() {
+        Options options = new Options();
+        
+        options.addOption("h", "help", false, "Show help message");
+        options.addOption("v", "version", false, "Show version");
+        options.addOption("s", "stats", false, "Show listening statistics");
+        options.addOption(null, "history", false, "Show listening history");
+        options.addOption(null, "collection-size", false, "Show collection size");
+        
+        options.addOption(Option.builder()
+            .longOpt("limit")
+            .hasArg()
+            .argName("NUMBER")
+            .desc("Limit number of history entries to show")
+            .build());
+        
+        options.addOption(Option.builder("g")
+            .longOpt("genre")
+            .hasArg()
+            .argName("GENRE")
+            .desc("Filter by genre")
+            .build());
+        
+        options.addOption(Option.builder("y")
+            .longOpt("year")
+            .hasArg()
+            .argName("YEAR")
+            .desc("Filter by year")
+            .build());
+        
+        options.addOption(Option.builder("f")
+            .longOpt("format")
+            .hasArg()
+            .argName("FORMAT")
+            .desc("Filter by format (e.g., Vinyl, CD)")
+            .build());
+        
+        options.addOption(Option.builder("a")
+            .longOpt("artist")
+            .hasArg()
+            .argName("ARTIST")
+            .desc("Filter by artist name")
+            .build());
+        
+        options.addOption(Option.builder()
+            .longOpt("min-year")
+            .hasArg()
+            .argName("YEAR")
+            .desc("Minimum year")
+            .build());
+        
+        options.addOption(Option.builder()
+            .longOpt("max-year")
+            .hasArg()
+            .argName("YEAR")
+            .desc("Maximum year")
+            .build());
+        
+        options.addOption(Option.builder("e")
+            .longOpt("export")
+            .hasArg()
+            .argName("FORMAT")
+            .desc("Export history (csv, html, markdown)")
+            .build());
+        
+        options.addOption(Option.builder("o")
+            .longOpt("output")
+            .hasArg()
+            .argName("FILE")
+            .desc("Output filename for export")
+            .build());
+        
+        options.addOption(null, "no-duplicate", false, "Skip albums already in history");
+        
+        return options;
+    }
+    
+    private AlbumFilter buildFilter(CommandLine cmd) {
+        AlbumFilter filter = new AlbumFilter();
+        
+        if (cmd.hasOption("genre")) {
+            filter.setGenre(cmd.getOptionValue("genre"));
         }
         
-        return null;
-    }
-
-    private static void displayAlbumInfo(JsonObject album) {
-        JsonObject basicInfo = album.getAsJsonObject("basic_information");
+        if (cmd.hasOption("year")) {
+            filter.setYear(cmd.getOptionValue("year"));
+        }
         
-        String title = basicInfo.has("title") ? basicInfo.get("title").getAsString() : "Unknown";
-        String artist = "Unknown Artist";
+        if (cmd.hasOption("format")) {
+            filter.setFormat(cmd.getOptionValue("format"));
+        }
         
-        if (basicInfo.has("artists")) {
-            JsonArray artists = basicInfo.getAsJsonArray("artists");
-            if (artists.size() > 0) {
-                artist = artists.get(0).getAsJsonObject().get("name").getAsString();
+        if (cmd.hasOption("artist")) {
+            filter.setArtist(cmd.getOptionValue("artist"));
+        }
+        
+        if (cmd.hasOption("min-year")) {
+            try {
+                filter.setMinYear(Integer.parseInt(cmd.getOptionValue("min-year")));
+            } catch (NumberFormatException e) {
+                logger.warn("Invalid min-year value", e);
             }
         }
         
-        String year = basicInfo.has("year") ? basicInfo.get("year").getAsString() : "Unknown";
-        String format = "Unknown";
-        
-        if (basicInfo.has("formats")) {
-            JsonArray formats = basicInfo.getAsJsonArray("formats");
-            if (formats.size() > 0) {
-                JsonObject formatObj = formats.get(0).getAsJsonObject();
-                format = formatObj.has("name") ? formatObj.get("name").getAsString() : "Unknown";
+        if (cmd.hasOption("max-year")) {
+            try {
+                filter.setMaxYear(Integer.parseInt(cmd.getOptionValue("max-year")));
+            } catch (NumberFormatException e) {
+                logger.warn("Invalid max-year value", e);
             }
         }
         
-        System.out.println("Album Selected:");
-        System.out.println("───────────────────────────────────");
-        System.out.println("Artist: " + artist);
-        System.out.println("Title:  " + title);
-        System.out.println("Year:   " + year);
-        System.out.println("Format: " + format);
-        System.out.println("───────────────────────────────────");
+        return filter;
     }
-
-    private static boolean askToMarkAsListened() {
+    
+    private void pickRandomAlbum(AlbumFilter filter) throws DiscogsApiException, HistoryException {
+        System.out.println("╔════════════════════════════════════════╗");
+        System.out.println("║   🎲 DISCOGS RANDOM ALBUM PICKER 🎲   ║");
+        System.out.println("╚════════════════════════════════════════╝\n");
+        
+        logger.info("Picking random album");
+        Album album = discogsService.getRandomAlbum(filter);
+        
+        displayAlbumInfo(album);
+        
+        // Check if already in history
+        if (historyService.isInHistory(album)) {
+            int count = historyService.getListenCount(album.getDiscogsId());
+            System.out.println("\n⚠️  You've already listened to this album " + count + " time(s)");
+        }
+        
+        // Ask to mark as listened
+        if (askToMarkAsListened()) {
+            historyService.addToHistory(album);
+            System.out.println("\n✅ Album added to listening history!");
+        } else {
+            System.out.println("\n⏭️  Skipped");
+        }
+    }
+    
+    private void displayAlbumInfo(Album album) {
+        System.out.println("┌────────────────────────────────────────┐");
+        System.out.println("│           ALBUM INFORMATION            │");
+        System.out.println("└────────────────────────────────────────┘\n");
+        
+        System.out.println("🎤 Artist:  " + album.getArtistsAsString());
+        System.out.println("💿 Title:   " + album.getTitle());
+        System.out.println("📅 Year:    " + album.getYear());
+        System.out.println("📀 Format:  " + album.getFormatsAsString());
+        
+        if (!album.getGenres().isEmpty()) {
+            System.out.println("🎵 Genres:  " + album.getGenresAsString());
+        }
+        
+        if (!album.getStyles().isEmpty()) {
+            System.out.println("🎼 Styles:  " + album.getStylesAsString());
+        }
+        
+        System.out.println("🔗 ID:      " + album.getDiscogsId());
+        
+        if (!album.getCoverImage().isEmpty() && !album.getCoverImage().equals("")) {
+            System.out.println("🖼️  Cover:   " + album.getCoverImage());
+        }
+    }
+    
+    private boolean askToMarkAsListened() {
         Scanner scanner = new Scanner(System.in);
-        System.out.print("\nMark as listened? (y/n): ");
+        System.out.print("\n❓ Mark as listened? (y/n): ");
         String response = scanner.nextLine().trim().toLowerCase();
         return response.equals("y") || response.equals("yes");
     }
-
-    private static void saveToHistory(JsonObject album) throws IOException {
-        List<JsonObject> history = loadHistory();
+    
+    private void showStatistics() throws HistoryException {
+        logger.info("Showing statistics");
+        Statistics stats = statisticsService.generateStatistics();
+        String formatted = statisticsService.formatStatistics(stats);
+        System.out.println(formatted);
+    }
+    
+    private void showHistory(CommandLine cmd) throws HistoryException {
+        logger.info("Showing history");
         
-        JsonObject basicInfo = album.getAsJsonObject("basic_information");
-        JsonObject historyEntry = new JsonObject();
-        
-        historyEntry.addProperty("title", basicInfo.has("title") ? basicInfo.get("title").getAsString() : "Unknown");
-        
-        if (basicInfo.has("artists")) {
-            JsonArray artists = basicInfo.getAsJsonArray("artists");
-            if (artists.size() > 0) {
-                historyEntry.addProperty("artist", artists.get(0).getAsJsonObject().get("name").getAsString());
+        int limit = Integer.MAX_VALUE;
+        if (cmd.hasOption("limit")) {
+            try {
+                limit = Integer.parseInt(cmd.getOptionValue("limit"));
+            } catch (NumberFormatException e) {
+                logger.warn("Invalid limit value", e);
             }
         }
         
-        historyEntry.addProperty("year", basicInfo.has("year") ? basicInfo.get("year").getAsString() : "Unknown");
-        historyEntry.addProperty("listened_date", LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
+        List<ListeningHistoryEntry> history = historyService.getRecentHistory(limit);
         
-        if (album.has("id")) {
-            historyEntry.addProperty("discogs_id", album.get("id").getAsInt());
+        System.out.println("\n╔══════════════════════════════════════╗");
+        System.out.println("║       LISTENING HISTORY              ║");
+        System.out.println("╚══════════════════════════════════════╝\n");
+        
+        if (history.isEmpty()) {
+            System.out.println("No listening history yet. Start by picking an album!");
+            return;
         }
         
-        history.add(historyEntry);
+        System.out.println(String.format("Total: %d albums\n", history.size()));
         
-        // Save to file
-        try (FileWriter writer = new FileWriter(HISTORY_FILE)) {
-            gson.toJson(history, writer);
+        for (int i = 0; i < history.size(); i++) {
+            ListeningHistoryEntry entry = history.get(i);
+            System.out.println(String.format("%d. %s - %s (%s)",
+                i + 1,
+                entry.getArtist(),
+                entry.getTitle(),
+                entry.getYear()));
+            System.out.println(String.format("   Listened: %s",
+                entry.getListenedDate().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))));
+            
+            if (entry.getRating() != null) {
+                System.out.println("   Rating: " + "★".repeat(entry.getRating()));
+            }
+            
+            if (i < history.size() - 1) {
+                System.out.println();
+            }
         }
     }
-
-    private static List<JsonObject> loadHistory() throws IOException {
-        File historyFile = new File(HISTORY_FILE);
-        if (!historyFile.exists()) {
-            return new ArrayList<>();
+    
+    private void exportHistory(CommandLine cmd) throws HistoryException {
+        String format = cmd.getOptionValue("export", "csv");
+        String filename = cmd.getOptionValue("output");
+        
+        if (filename == null) {
+            filename = "listening_history." + format;
         }
         
-        String content = new String(Files.readAllBytes(Paths.get(HISTORY_FILE)));
-        if (content.trim().isEmpty() || content.trim().equals("[]")) {
-            return new ArrayList<>();
+        logger.info("Exporting history to {} format: {}", format, filename);
+        System.out.println("Exporting listening history to " + format.toUpperCase() + "...");
+        
+        switch (format.toLowerCase()) {
+            case "csv":
+                exportService.exportToCsv(filename);
+                break;
+            case "html":
+                exportService.exportToHtml(filename);
+                break;
+            case "markdown":
+            case "md":
+                exportService.exportToMarkdown(filename);
+                break;
+            default:
+                System.err.println("Unknown export format: " + format);
+                System.err.println("Supported formats: csv, html, markdown");
+                return;
         }
         
-        JsonArray jsonArray = gson.fromJson(content, JsonArray.class);
-        List<JsonObject> history = new ArrayList<>();
+        System.out.println("✅ Exported to: " + filename);
+    }
+    
+    private void showCollectionSize() throws DiscogsApiException {
+        logger.info("Showing collection size");
+        int size = discogsService.getCollectionSize();
+        System.out.println("\n📀 Your Discogs collection has " + size + " albums");
+    }
+    
+    private void printHelp(Options options) {
+        HelpFormatter formatter = new HelpFormatter();
+        formatter.setWidth(100);
         
-        for (int i = 0; i < jsonArray.size(); i++) {
-            history.add(jsonArray.get(i).getAsJsonObject());
-        }
+        System.out.println("\n╔════════════════════════════════════════════════════════════════╗");
+        System.out.println("║        DISCOGS RANDOM ALBUM PICKER v" + VERSION + "                       ║");
+        System.out.println("╚════════════════════════════════════════════════════════════════╝\n");
         
-        return history;
+        formatter.printHelp("java -jar discogs-random-picker.jar [OPTIONS]", 
+            "\nOptions:", options, 
+            "\nExamples:\n" +
+            "  Pick random album:          java -jar discogs-random-picker.jar\n" +
+            "  Filter by genre:            java -jar discogs-random-picker.jar --genre Rock\n" +
+            "  Filter by year:             java -jar discogs-random-picker.jar --year 1980\n" +
+            "  Filter by decade:           java -jar discogs-random-picker.jar --min-year 1970 --max-year 1979\n" +
+            "  Show statistics:            java -jar discogs-random-picker.jar --stats\n" +
+            "  Show history (last 10):     java -jar discogs-random-picker.jar --history --limit 10\n" +
+            "  Export to CSV:              java -jar discogs-random-picker.jar --export csv\n" +
+            "  Export to HTML:             java -jar discogs-random-picker.jar --export html -o myhistory.html\n");
     }
 }
