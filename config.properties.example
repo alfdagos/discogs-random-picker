@@ -1,34 +1,8 @@
-# Discogs Random Album Picker - Configuration Template
-# Copy this file to 'config.properties' and fill in your API credentials
-# Alternatively, you can set these values as environment variables
+# Discogs API Configuration
+# Get your token from: https://www.discogs.com/settings/developers
+discogs.username=your_discogs_username
+discogs.token=your_discogs_api_token
 
-# ==========================================
-# DISCOGS API CONFIGURATION
-# ==========================================
-# Get your personal access token from: https://www.discogs.com/settings/developers
-# Required for accessing your Discogs collection
-discogs.token=YOUR_DISCOGS_TOKEN_HERE
-
-# Your Discogs username (used to fetch your collection)
-discogs.username=YOUR_DISCOGS_USERNAME_HERE
-
-# ==========================================
-# SPOTIFY API CONFIGURATION
-# ==========================================
-# Create a Spotify application at: https://developer.spotify.com/dashboard
-# This application uses the Client Credentials Flow (no user authentication required)
-
-# Spotify Client ID from your application dashboard
-spotify.client.id=YOUR_SPOTIFY_CLIENT_ID_HERE
-
-# Spotify Client Secret from your application dashboard
-spotify.client.secret=YOUR_SPOTIFY_CLIENT_SECRET_HERE
-
-# ==========================================
-# APPLICATION SETTINGS
-# ==========================================
-# Maximum number of retries for API calls (default: 3)
-api.max.retries=3
-
-# Delay between retries in milliseconds (default: 1000)
-api.retry.delay=1000
+# Spotify API Configuration (Optional - for future integration)
+spotify.client.id=your_spotify_client_id
+spotify.client.secret=your_spotify_client_secret

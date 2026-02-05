@@ -4,6 +4,12 @@
 # Log files
 *.log
 
+# BlueJ files
+*.ctxt
+
+# Mobile Tools for Java (J2ME)
+.mtj.tmp/
+
 # Package Files
 *.jar
 *.war
@@ -12,6 +18,10 @@
 *.zip
 *.tar.gz
 *.rar
+
+# Virtual machine crash logs
+hs_err_pid*
+replay_pid*
 
 # Maven
 target/
@@ -25,24 +35,19 @@ buildNumber.properties
 .mvn/timing.properties
 .mvn/wrapper/maven-wrapper.jar
 
-# IDE - IntelliJ IDEA
+# IntelliJ IDEA
 .idea/
 *.iws
 *.iml
 *.ipr
-out/
 
-# IDE - Eclipse
+# Eclipse
 .classpath
 .project
 .settings/
 bin/
 
-# IDE - VS Code
-.vscode/
-*.code-workspace
-
-# IDE - NetBeans
+# NetBeans
 nbproject/private/
 build/
 nbbuild/
@@ -50,24 +55,14 @@ dist/
 nbdist/
 .nb-gradle/
 
-# macOS
+# VS Code
+.vscode/
+
+# Mac OS
 .DS_Store
-.AppleDouble
-.LSOverride
 
-# Windows
-Thumbs.db
-ehthumbs.db
-Desktop.ini
-
-# Configuration files (contains sensitive API keys)
+# Configuration files (should not be committed)
 config.properties
 
-# History file (user data)
-listening_history.json
-
-# Temporary files
-*.tmp
-*.bak
-*.swp
-*~.nib
+# Keep example configuration
+!config.properties.example
