@@ -34,14 +34,14 @@ async function getJson(url: string, signal?: AbortSignal): Promise<any> {
       throw new DiscogsError('Errore di rete: controlla la connessione.');
     }
     if (res.status === 429 && attempt < MAX_RETRIES) {
-      // Anonymous access is limited to ~25 requests/minute.
+      // Authenticated access is limited to ~60 requests/minute.
       const wait = Number(res.headers.get('Retry-After')) || 8;
       await sleep(wait * 1000);
       continue;
     }
     if (res.status === 404) throw new DiscogsError('Utente non trovato. Controlla lo username.');
     if (res.status === 401 || res.status === 403)
-      throw new DiscogsError('La collezione è privata. Rendila pubblica dalle impostazioni privacy di Discogs.');
+      throw new DiscogsError('Token Discogs non valido o scaduto.');
     if (res.status === 429) throw new DiscogsError('Troppe richieste a Discogs. Riprova tra un minuto.');
     if (!res.ok) throw new DiscogsError(`Discogs ha risposto con errore ${res.status}.`);
     return res.json();
@@ -51,6 +51,7 @@ async function getJson(url: string, signal?: AbortSignal): Promise<any> {
 /** Downloads the whole public collection (folder 0 = "All"), de-duplicated by release id. */
 export async function fetchCollection(
   username: string,
+  token: string,
   onProgress: (loaded: number, total: number) => void,
   signal?: AbortSignal,
 ): Promise<Album[]> {
@@ -58,7 +59,7 @@ export async function fetchCollection(
   let page = 1;
   let pages = 1;
   do {
-    const url = `${API}/users/${encodeURIComponent(username)}/collection/folders/0/releases?page=${page}&per_page=${PER_PAGE}`;
+    const url = `${API}/users/${encodeURIComponent(username)}/collection/folders/0/releases?page=${page}&per_page=${PER_PAGE}${token ? `&token=${encodeURIComponent(token)}` : ''}`;
     const data = await getJson(url, signal);
     pages = data.pagination?.pages ?? 1;
     for (const r of data.releases ?? []) {

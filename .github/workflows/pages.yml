@@ -31,6 +31,9 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+        env:
+          VITE_DISCOGS_USER: ${{ secrets.DISCOGS_USER }}
+          VITE_DISCOGS_TOKEN: ${{ secrets.DISCOGS_TOKEN }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web/dist

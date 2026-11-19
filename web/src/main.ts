@@ -4,13 +4,14 @@ import { applyFilter, artistLine, facets, pickRandom } from './filter';
 import { computeStats, type Ranked } from './stats';
 import { download, esc, toCSV, toHTML, toJSON, toMarkdown } from './export';
 import { store } from './store';
+import { config } from './config';
 import { emptyFilter, type Album, type Filter } from './types';
 
 type Tab = 'pick' | 'history' | 'stats' | 'settings';
 
 const state = {
   tab: 'pick' as Tab,
-  user: store.getUser(),
+  user: config.user,
   collection: [] as Album[],
   fetchedAt: '',
   loading: null as null | { loaded: number; total: number },
@@ -59,6 +60,7 @@ async function loadCollection(force = false) {
   try {
     const albums = await fetchCollection(
       state.user,
+      config.token,
       (loaded, total) => {
         state.loading = { loaded, total };
         const bar = document.getElementById('progress');
@@ -91,20 +93,17 @@ function loaderView(): string {
     <h2>Carico la tua collezione…</h2>
     <p class="muted" id="progress-label">${l.loaded} / ${l.total} dischi</p>
     <div class="bar"><i id="progress" style="width:${pct}%"></i></div>
-    <p class="muted" style="margin-top:12px">Discogs consente circa 25 richieste al minuto: con collezioni grandi può servire un po’.</p>
+    <p class="muted" style="margin-top:12px">Solo al primo avvio: poi la collezione resta in cache.</p>
     <button class="btn small" data-action="cancel">Annulla</button></div>`;
 }
 
-function onboardingView(): string {
-  return `<form class="card stack" data-action="save-user">
-    <div><h2>Benvenuto 👋</h2>
-    <p class="muted">Inserisci il tuo username Discogs. Non serve alcun login né token: basta che la collezione sia pubblica.</p></div>
-    <label>Username Discogs
-      <input type="text" name="user" autocomplete="off" autocapitalize="none" spellcheck="false" required placeholder="es. mario.rossi" value="${esc(state.user)}"></label>
-    ${state.error ? `<p style="color:var(--danger)">${esc(state.error)}</p>` : ''}
-    <button class="btn primary big" type="submit">Continua</button>
-    <p class="muted">Per rendere pubblica la collezione: Discogs → Settings → Privacy → “Collection” visibile a tutti.</p>
-  </form>`;
+function errorView(): string {
+  const msg = state.user
+    ? state.error
+    : 'Configurazione mancante: imposta VITE_DISCOGS_USER e VITE_DISCOGS_TOKEN (vedi web/.env.example).';
+  return `<div class="card stack"><h2>Qualcosa non va</h2>
+    <p style="color:var(--danger)">${esc(msg)}</p>
+    ${state.user ? '<button class="btn primary" data-action="reload">Riprova</button>' : ''}</div>`;
 }
 
 function filterPanel(): string {
@@ -149,7 +148,7 @@ function resultView(a: Album): string {
 
 function pickView(): string {
   if (state.loading) return loaderView();
-  if (!state.user || state.error) return onboardingView();
+  if (!state.user || state.error) return errorView();
   if (!state.collection.length)
     return `<div class="card empty"><div class="disc"></div><p>La collezione è vuota.</p><button class="btn" data-action="reload">Ricarica</button></div>`;
   const n = pool().length;
@@ -201,16 +200,11 @@ function statsView(): string {
 
 function settingsView(): string {
   return `<div class="stack">
-    <form class="card stack" data-action="save-user">
-      <h3>Account Discogs</h3>
-      <label>Username<input type="text" name="user" value="${esc(state.user)}" autocapitalize="none" autocomplete="off" spellcheck="false" required></label>
-      ${state.error ? `<p style="color:var(--danger)">${esc(state.error)}</p>` : ''}
-      <button class="btn primary" type="submit">Salva e ricarica</button></form>
-    <div class="card stack"><h3>Collezione</h3>
+    <div class="card stack"><h3>Collezione di ${esc(state.user)}</h3>
       <p class="muted">${state.collection.length} dischi in cache${state.fetchedAt ? ` · aggiornata il ${fmtDate(state.fetchedAt)}` : ''}</p>
       <button class="btn" data-action="reload" ${state.user ? '' : 'disabled'}>↻ Aggiorna da Discogs</button></div>
-    <div class="card"><h3>Privacy</h3><p class="muted">Nessun login, token o server. Username, collezione e storico restano solo in questo browser (localStorage); l’app contatta soltanto l’API pubblica di Discogs.</p></div>
-    <button class="btn danger" data-action="logout">Dimentica username e dati locali</button></div>`;
+    <div class="card"><h3>Dati</h3><p class="muted">Collezione e storico sono salvati solo in questo browser (localStorage).</p></div>
+    <button class="btn danger" data-action="logout">Cancella storico e cache locale</button></div>`;
 }
 
 /* ---------- render ---------- */
@@ -260,20 +254,6 @@ function exportHistory(kind: string) {
   download(`storico-ascolti.${ext}`, content, mime);
 }
 
-function saveUser(form: HTMLFormElement) {
-  const user = String(new FormData(form).get('user') ?? '').trim();
-  if (!user) return;
-  if (user.toLowerCase() !== state.user.toLowerCase()) {
-    state.collection = [];
-    state.current = null;
-    store.clearCollection();
-  }
-  state.user = user;
-  store.setUser(user);
-  state.tab = 'pick';
-  void loadCollection(!state.collection.length);
-}
-
 $view.addEventListener('click', (e) => {
   const el = (e.target as HTMLElement).closest<HTMLElement>('[data-action],[data-export]');
   if (!el) return;
@@ -299,18 +279,12 @@ $view.addEventListener('click', (e) => {
       }
       return;
     case 'logout':
-      if (confirm('Rimuovere username, collezione e storico da questo dispositivo?')) {
-        ['drp:user', 'drp:collection', 'drp:history', 'drp:filter'].forEach((k) => { try { localStorage.removeItem(k); } catch { /* ignore */ } });
-        Object.assign(state, { user: '', collection: [], history: [], current: null, filter: emptyFilter(), tab: 'pick', error: '' });
-        render();
+      if (confirm('Cancellare storico e cache della collezione da questo dispositivo?')) {
+        ['drp:collection', 'drp:history', 'drp:filter'].forEach((k) => { try { localStorage.removeItem(k); } catch { /* ignore */ } });
+        Object.assign(state, { collection: [], history: [], current: null, filter: emptyFilter(), tab: 'pick', error: '' });
+        void loadCollection(true);
       }
   }
-});
-
-$view.addEventListener('submit', (e) => {
-  e.preventDefault();
-  const form = e.target as HTMLFormElement;
-  if (form.dataset.action === 'save-user') saveUser(form);
 });
 
 $view.addEventListener('input', (e) => {

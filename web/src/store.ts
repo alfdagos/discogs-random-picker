@@ -1,6 +1,6 @@
 import { emptyFilter, type Album, type Filter, type HistoryEntry } from './types';
 
-const K = { user: 'drp:user', coll: 'drp:collection', hist: 'drp:history', filter: 'drp:filter' } as const;
+const K = { coll: 'drp:collection', hist: 'drp:history', filter: 'drp:filter' } as const;
 
 function read<T>(key: string, fallback: T): T {
   try {
@@ -22,8 +22,6 @@ function write(key: string, value: unknown): boolean {
 export interface CollectionCache { user: string; fetchedAt: string; albums: Album[] }
 
 export const store = {
-  getUser: () => read<string>(K.user, ''),
-  setUser: (u: string) => write(K.user, u),
   getCollection: (user: string): CollectionCache | null => {
     const c = read<CollectionCache | null>(K.coll, null);
     return c && c.user.toLowerCase() === user.toLowerCase() ? c : null;
