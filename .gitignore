@@ -78,3 +78,6 @@ listening_history_export.*
 
 # Keep the main listening history
 !listening_history.json
+
+# Web app entry point must be tracked
+!web/index.html
