@@ -22,6 +22,12 @@ const state = {
   query: '',
 };
 
+interface InstallPromptEvent extends Event {
+  prompt(): Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+}
+let installPrompt: InstallPromptEvent | null = null;
+
 const $view = document.getElementById('view')!;
 const $badge = document.getElementById('user-badge')!;
 let abort: AbortController | null = null;
@@ -198,8 +204,19 @@ function statsView(): string {
     ${rankView('Decenni', s.decades)}${rankView('Formati', s.formats)}</div>`;
 }
 
+function installCard(): string {
+  const standalone = matchMedia('(display-mode: standalone)').matches || (navigator as { standalone?: boolean }).standalone;
+  if (standalone) return '';
+  if (installPrompt)
+    return `<div class="card stack"><h3>App</h3><p class="muted">Installa Random Picker sulla schermata Home: si apre a schermo intero e funziona anche offline.</p>
+      <button class="btn primary" data-action="install">Installa app</button></div>`;
+  if (/iphone|ipad|ipod/i.test(navigator.userAgent))
+    return `<div class="card"><h3>App</h3><p class="muted">Per installarla: tocca <b>Condividi</b> in Safari, poi <b>Aggiungi a Home</b>.</p></div>`;
+  return '';
+}
+
 function settingsView(): string {
-  return `<div class="stack">
+  return `<div class="stack">${installCard()}
     <div class="card stack"><h3>Collezione di ${esc(state.user)}</h3>
       <p class="muted">${state.collection.length} dischi in cache${state.fetchedAt ? ` · aggiornata il ${fmtDate(state.fetchedAt)}` : ''}</p>
       <button class="btn" data-action="reload" ${state.user ? '' : 'disabled'}>↻ Aggiorna da Discogs</button></div>
@@ -259,6 +276,13 @@ $view.addEventListener('click', (e) => {
   if (!el) return;
   if (el.dataset.export) return exportHistory(el.dataset.export);
   switch (el.dataset.action) {
+    case 'install':
+      if (installPrompt) {
+        const p = installPrompt;
+        installPrompt = null;
+        void p.prompt().then(() => p.userChoice).then(() => render());
+      }
+      return;
     case 'pick': return doPick();
     case 'listened': return markListened();
     case 'reload': return void loadCollection(true);
@@ -320,6 +344,25 @@ document.querySelector('.tabbar')!.addEventListener('click', (e) => {
 render();
 void loadCollection();
 
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  installPrompt = e as InstallPromptEvent;
+  if (state.tab === 'settings') render();
+});
+window.addEventListener('appinstalled', () => {
+  installPrompt = null;
+  toast('App installata ✓');
+  if (state.tab === 'settings') render();
+});
+
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloading = false;
+  // A new version took over: reload once so the page and its assets match.
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloading) return;
+    reloading = true;
+    location.reload();
+  });
   navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => undefined);
 }

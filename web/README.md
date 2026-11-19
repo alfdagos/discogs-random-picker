@@ -7,7 +7,7 @@ Vite + TypeScript vanilla (zero dipendenze runtime, ~7 KB gzip di JS). Hugo è s
 
 - Collezione scaricata dall'API Discogs con il tuo token e messa in cache in `localStorage`.
 - Storico e filtri salvati solo nel browser.
-- PWA: installabile, funziona offline sui dati già in cache.
+- PWA completa: installabile (Android/desktop dal pulsante in Opzioni, iOS da Condividi → Aggiungi a Home), icone PNG e maskable, shell precaricata dal service worker per l'avvio offline, copertine in cache (stale-while-revalidate), aggiornamento automatico alla nuova versione.
 - Export storico: CSV, Markdown, HTML, JSON.
 
 ## Configurazione
